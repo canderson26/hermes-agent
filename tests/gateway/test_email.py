@@ -249,6 +249,7 @@ class TestDispatchMessage(unittest.TestCase):
             "EMAIL_SMTP_HOST": "smtp.test.com",
             "EMAIL_SMTP_PORT": "587",
             "EMAIL_POLL_INTERVAL": "15",
+            "EMAIL_USE_SSL": "true",
         }):
             from gateway.platforms.email import EmailAdapter
             adapter = EmailAdapter(PlatformConfig(enabled=True))
@@ -521,6 +522,7 @@ class TestThreadContext(unittest.TestCase):
             "EMAIL_PASSWORD": "secret",
             "EMAIL_IMAP_HOST": "imap.test.com",
             "EMAIL_SMTP_HOST": "smtp.test.com",
+            "EMAIL_USE_SSL": "true",
         }):
             from gateway.platforms.email import EmailAdapter
             adapter = EmailAdapter(PlatformConfig(enabled=True))
@@ -618,6 +620,7 @@ class TestSendMethods(unittest.TestCase):
             "EMAIL_PASSWORD": "secret",
             "EMAIL_IMAP_HOST": "imap.test.com",
             "EMAIL_SMTP_HOST": "smtp.test.com",
+            "EMAIL_USE_SSL": "true",
         }):
             from gateway.platforms.email import EmailAdapter
             adapter = EmailAdapter(PlatformConfig(enabled=True))
@@ -641,6 +644,33 @@ class TestSendMethods(unittest.TestCase):
             mock_server.login.assert_called_once_with("hermes@test.com", "secret")
             mock_server.send_message.assert_called_once()
             mock_server.quit.assert_called_once()
+
+    def test_send_plaintext_mode_skips_starttls(self):
+        """EMAIL_USE_SSL=false should log in over plaintext SMTP tunnels."""
+        import asyncio
+        from gateway.config import PlatformConfig
+        with patch.dict(os.environ, {
+            "EMAIL_ADDRESS": "hermes@test.com",
+            "EMAIL_PASSWORD": "secret",
+            "EMAIL_IMAP_HOST": "127.0.0.1",
+            "EMAIL_IMAP_PORT": "993",
+            "EMAIL_SMTP_HOST": "127.0.0.1",
+            "EMAIL_SMTP_PORT": "587",
+            "EMAIL_USE_SSL": "false",
+        }):
+            from gateway.platforms.email import EmailAdapter
+            adapter = EmailAdapter(PlatformConfig(enabled=True))
+
+        with patch("smtplib.SMTP") as mock_smtp:
+            mock_server = MagicMock()
+            mock_smtp.return_value = mock_server
+
+            result = asyncio.run(adapter.send("user@test.com", "Hello through tunnel"))
+
+            self.assertTrue(result.success)
+            mock_server.starttls.assert_not_called()
+            mock_server.login.assert_called_once_with("hermes@test.com", "secret")
+            mock_server.send_message.assert_called_once()
 
     def test_send_failure_returns_error(self):
         """SMTP failure should return SendResult with error."""
@@ -738,6 +768,7 @@ class TestConnectDisconnect(unittest.TestCase):
             "EMAIL_PASSWORD": "secret",
             "EMAIL_IMAP_HOST": "imap.test.com",
             "EMAIL_SMTP_HOST": "smtp.test.com",
+            "EMAIL_USE_SSL": "true",
         }):
             from gateway.platforms.email import EmailAdapter
             adapter = EmailAdapter(PlatformConfig(enabled=True))
@@ -763,6 +794,42 @@ class TestConnectDisconnect(unittest.TestCase):
             # Should have skipped existing messages
             self.assertEqual(len(adapter._seen_uids), 3)
             # Cleanup
+            adapter._running = False
+            if adapter._poll_task:
+                adapter._poll_task.cancel()
+
+    def test_connect_plaintext_mode_uses_plain_imap_and_smtp(self):
+        """EMAIL_USE_SSL=false should avoid IMAP SSL and SMTP STARTTLS."""
+        import asyncio
+        from gateway.config import PlatformConfig
+        with patch.dict(os.environ, {
+            "EMAIL_ADDRESS": "hermes@test.com",
+            "EMAIL_PASSWORD": "secret",
+            "EMAIL_IMAP_HOST": "127.0.0.1",
+            "EMAIL_IMAP_PORT": "993",
+            "EMAIL_SMTP_HOST": "127.0.0.1",
+            "EMAIL_SMTP_PORT": "587",
+            "EMAIL_USE_SSL": "false",
+        }):
+            from gateway.platforms.email import EmailAdapter
+            adapter = EmailAdapter(PlatformConfig(enabled=True))
+
+        mock_imap = MagicMock()
+        mock_imap.uid.return_value = ("OK", [b"1 2 3"])
+
+        with patch("imaplib.IMAP4", return_value=mock_imap) as mock_plain_imap, \
+             patch("imaplib.IMAP4_SSL") as mock_ssl_imap, \
+             patch("smtplib.SMTP") as mock_smtp:
+            mock_server = MagicMock()
+            mock_smtp.return_value = mock_server
+
+            result = asyncio.run(adapter.connect())
+
+            self.assertTrue(result)
+            mock_plain_imap.assert_any_call("127.0.0.1", 993, timeout=30)
+            mock_ssl_imap.assert_not_called()
+            mock_server.starttls.assert_not_called()
+            mock_server.login.assert_called_once_with("hermes@test.com", "secret")
             adapter._running = False
             if adapter._poll_task:
                 adapter._poll_task.cancel()
@@ -816,6 +883,7 @@ class TestFetchNewMessages(unittest.TestCase):
             "EMAIL_PASSWORD": "secret",
             "EMAIL_IMAP_HOST": "imap.test.com",
             "EMAIL_SMTP_HOST": "smtp.test.com",
+            "EMAIL_USE_SSL": "true",
         }):
             from gateway.platforms.email import EmailAdapter
             adapter = EmailAdapter(PlatformConfig(enabled=True))
@@ -910,6 +978,7 @@ class TestPollLoop(unittest.TestCase):
             "EMAIL_IMAP_HOST": "imap.test.com",
             "EMAIL_SMTP_HOST": "smtp.test.com",
             "EMAIL_POLL_INTERVAL": "1",
+            "EMAIL_USE_SSL": "true",
         }):
             from gateway.platforms.email import EmailAdapter
             adapter = EmailAdapter(PlatformConfig(enabled=True))
@@ -1023,6 +1092,7 @@ class TestSmtpConnectionCleanup(unittest.TestCase):
         "EMAIL_IMAP_HOST": "imap.test.com",
         "EMAIL_SMTP_HOST": "smtp.test.com",
         "EMAIL_SMTP_PORT": "587",
+        "EMAIL_USE_SSL": "true",
     }, clear=False)
     def _make_adapter(self):
         from gateway.config import PlatformConfig
@@ -1035,6 +1105,7 @@ class TestSmtpConnectionCleanup(unittest.TestCase):
         "EMAIL_IMAP_HOST": "imap.test.com",
         "EMAIL_SMTP_HOST": "smtp.test.com",
         "EMAIL_SMTP_PORT": "587",
+        "EMAIL_USE_SSL": "true",
     }, clear=False)
     def test_smtp_quit_called_on_send_message_failure(self):
         """SMTP quit() must be called even when send_message() raises."""
@@ -1054,6 +1125,7 @@ class TestSmtpConnectionCleanup(unittest.TestCase):
         "EMAIL_IMAP_HOST": "imap.test.com",
         "EMAIL_SMTP_HOST": "smtp.test.com",
         "EMAIL_SMTP_PORT": "587",
+        "EMAIL_USE_SSL": "true",
     }, clear=False)
     def test_smtp_close_called_when_quit_also_fails(self):
         """If both send_message() and quit() fail, close() is the fallback."""
@@ -1078,6 +1150,7 @@ class TestImapConnectionCleanup(unittest.TestCase):
         "EMAIL_IMAP_HOST": "imap.test.com",
         "EMAIL_IMAP_PORT": "993",
         "EMAIL_SMTP_HOST": "smtp.test.com",
+        "EMAIL_USE_SSL": "true",
     }, clear=False)
     def _make_adapter(self):
         from gateway.config import PlatformConfig
@@ -1090,6 +1163,7 @@ class TestImapConnectionCleanup(unittest.TestCase):
         "EMAIL_IMAP_HOST": "imap.test.com",
         "EMAIL_IMAP_PORT": "993",
         "EMAIL_SMTP_HOST": "smtp.test.com",
+        "EMAIL_USE_SSL": "true",
     }, clear=False)
     def test_imap_logout_called_on_uid_fetch_failure(self):
         """IMAP logout() must be called even when uid fetch raises."""
@@ -1117,6 +1191,7 @@ class TestImapConnectionCleanup(unittest.TestCase):
         "EMAIL_IMAP_HOST": "imap.test.com",
         "EMAIL_IMAP_PORT": "993",
         "EMAIL_SMTP_HOST": "smtp.test.com",
+        "EMAIL_USE_SSL": "true",
     }, clear=False)
     def test_imap_logout_called_on_early_return(self):
         """IMAP logout() must be called even when returning early (no unseen)."""
@@ -1145,6 +1220,7 @@ class TestImapIdExtensionForNetEase(unittest.TestCase):
             "EMAIL_PASSWORD": "secret",
             "EMAIL_IMAP_HOST": "imap.163.com",
             "EMAIL_SMTP_HOST": "smtp.163.com",
+            "EMAIL_USE_SSL": "true",
         }):
             from gateway.platforms.email import EmailAdapter
             adapter = EmailAdapter(PlatformConfig(enabled=True))
