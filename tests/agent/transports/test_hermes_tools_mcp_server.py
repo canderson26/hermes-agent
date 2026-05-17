@@ -48,8 +48,19 @@ class TestModuleSurface:
             "vision_analyze",
             "image_generate",
             "skill_view",
+            "obsidian_read_tasks",
         ):
             assert required in EXPOSED_TOOLS, f"missing {required!r}"
+
+    def test_obsidian_read_tasks_exposed(self):
+        """Codex-runtime workers need the structured Obsidian reader too.
+
+        This is not a raw file primitive; it is a read-only task parser used by
+        profile canaries and vault-maintenance jobs.
+        """
+        from agent.transports.hermes_tools_mcp_server import EXPOSED_TOOLS
+
+        assert "obsidian_read_tasks" in EXPOSED_TOOLS
 
     def test_agent_loop_tools_not_exposed(self):
         """delegate_task / memory / session_search / todo require the

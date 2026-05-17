@@ -60,6 +60,8 @@ logger = logging.getLogger(__name__)
 #   - terminal / shell / read_file / write_file / patch / search_files /
 #     process — codex's built-ins cover these and approval routes through
 #     codex's own UI.
+#     Exception: obsidian_read_tasks is a structured read-only vault helper,
+#     not a raw file primitive, and profile canaries depend on it.
 #   - delegate_task / memory / session_search / todo — these are
 #     `_AGENT_LOOP_TOOLS` in Hermes (model_tools.py:493). They require
 #     the running AIAgent context to dispatch (mid-loop state), so a
@@ -82,6 +84,7 @@ EXPOSED_TOOLS: tuple[str, ...] = (
     "image_generate",
     "skill_view",
     "skills_list",
+    "obsidian_read_tasks",
     "text_to_speech",
     # Kanban worker handoff tools — gated on HERMES_KANBAN_TASK env var
     # (set by the kanban dispatcher when spawning a worker). Without these

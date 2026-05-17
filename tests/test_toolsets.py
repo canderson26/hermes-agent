@@ -32,6 +32,16 @@ class TestGetToolset:
         assert ts is not None
         assert "web_search" in ts["tools"]
 
+    def test_obsidian_toolset(self):
+        assert get_toolset("obsidian") == {
+            "description": "Structured Obsidian vault helpers for Tasks.md and notes",
+            "tools": ["obsidian_read_tasks"],
+            "includes": [],
+        }
+
+    def test_default_cron_toolset_includes_obsidian_read_tasks(self):
+        assert "obsidian_read_tasks" in resolve_toolset("hermes-cron")
+
     def test_merges_registry_tools_into_builtin_toolset(self, monkeypatch):
         reg = ToolRegistry()
         reg.register(
